@@ -1,0 +1,5 @@
+# APP_HOME=project1
+ENABLE_PIPENV=true
+DISABLE_SETUP_PY_PROCESSING=true
+APP_FILE=project1/app.py
+
