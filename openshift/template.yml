@@ -1,0 +1,110 @@
+kind: Template
+apiVersion: v1
+metadata:
+  name: complexapp
+  labels:
+objects:
+  - kind: PersistentVolumeClaim
+    apiVersion: v1
+    metadata:
+      name: ${APPLICATION_NAME}-dbdata
+      labels:
+        app: ${APPLICATION_NAME}
+        template: complexapp
+    spec:
+      storageClassName: glusterfs-storage
+      accessModes:
+        - ReadWriteOnce
+      resources:
+        requests:
+          storage: "1500Mi"
+  - kind: Secret
+    apiVersion: v1
+    metadata:
+      name: ${APPLICATION_NAME}-secret
+      labels:
+        app: ${APPLICATION_NAME}
+        template: complexapp
+    data:
+      mysql_root_password: SuperRoot123
+    type: opaque
+  - kind: Service
+    apiVersion: v1
+    metadata:
+      name: ${APPLICATION_NAME}-db
+      labels:
+        app: ${APPLICATION_NAME}
+        template: complexapp
+    annotations:
+      template.openshift.io/expose-service_ip_port: "{.spec.clusterIP}:{.spec.ports[?.name==\"${APPLICATION_NAME}-db\"].port}"
+    spec:
+      selector:
+        app: ${APPLICATION_NAME}
+        template: complexapp
+      externalIPs:
+        - 10.189.132.18
+        - 10.189.132.21
+        - 10.189.132.24
+        - 10.189.132.28
+        - 10.189.132.30
+      ports:
+        - targetPort: 3306
+          protocol: TCP
+          port: ${MYSQL_PORT}
+          name: mysql
+  - kind: DeploymentConfig
+    apiVersion: v1
+    metadata:
+      name: ${APPLICATION_NAME}-database
+      labels:
+        app: ${APPLICATION_NAME}
+        template: complexapp
+      annotations:
+        template.alpha.openshift.io/wait-for-ready: "true"
+    spec:
+      replicas: 1
+      selector:
+        app: ${APPLICATION_NAME}
+        template: complexapp
+      template:
+        metadata:
+          labels:
+            app: ${APPLICATION_NAME}
+            template: complexapp
+        spec:
+          name: ${APPLICATION_NAME}-database
+          volumes:
+              - persistentVolumeClaim:
+                  claimName: ${APPLICATION_NAME}-dbdata
+                name: ${APPLICATION_NAME}-dbdata
+          containers:
+            - name: ${APPLICATION_NAME}-database
+              image: "mysql:latest"
+              ports:
+                - containerPort: 3306
+                  protocol: TCP
+                  name: mysql
+              readinessProbe:
+                initialDelaySeconds: 5
+                tcpSocket:
+                  port: 3306
+                timeoutSeconds: 3
+              env:
+                - name: MYSQL_ROOT_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: ${APPLICATION_NAME}-secret
+                      key: mysql_root_password
+              volumeMounts:
+                - mountPath: /var/lib/mysql
+                  name: ${APPLICATION_NAME}-dbdata
+
+parameters:
+  - description: Application name. It should be unique within a namespace
+    required: true
+    name: APPLICATION_NAME
+  - description: "Database port (default: 3306)"
+    required: false
+    name: MYSQL_PORT
+    value: "3306"
+
