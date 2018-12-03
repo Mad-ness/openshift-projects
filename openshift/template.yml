@@ -40,13 +40,15 @@ objects:
     spec:
       selector:
         app: ${APPLICATION_NAME}
+        type: database
         template: complexapp
-      externalIPs:
-        - 10.189.132.18
-        - 10.189.132.21
-        - 10.189.132.24
-        - 10.189.132.28
-        - 10.189.132.30
+# for running in Prod we don't need it accessible outside the cluster
+#      externalIPs:
+#        - 10.189.132.18
+#        - 10.189.132.21
+#        - 10.189.132.24
+#        - 10.189.132.28
+#        - 10.189.132.30
       ports:
         - targetPort: 3306
           protocol: TCP
@@ -66,10 +68,12 @@ objects:
       selector:
         app: ${APPLICATION_NAME}
         template: complexapp
+        type: database
       template:
         metadata:
           labels:
             app: ${APPLICATION_NAME}
+            type: database
             template: complexapp
         spec:
           name: ${APPLICATION_NAME}-database
@@ -99,12 +103,135 @@ objects:
                 - mountPath: /var/lib/mysql
                   name: ${APPLICATION_NAME}-dbdata
 
+  - kind: Service
+    apiVersion: v1
+    metadata:
+      name: ${APPLICATION_NAME}-backend
+      labels:
+        app: ${APPLICATION_NAME}
+        template: complexapp
+      annotations:
+        template.openshift.io/expose-service_ip_port: "{.spec.clusterIP}:{.spec.ports[?.name==\"${APPLICATION_NAME}-backend\"].port}"
+    spec:
+      selector:
+        app: ${APPLICATION_NAME}-backend
+        type: backend
+        template: complexapp
+# for running in Prod we don't need it accessible outside the cluster
+#      externalIPs:
+#        - 10.189.132.18
+#        - 10.189.132.21
+#        - 10.189.132.24
+#        - 10.189.132.28
+#        - 11.189.132.30
+      ports:
+        - targetPort: 8080
+          protocol: TCP
+          name: webbackend
+          port: ${BACKEND_PORT}
+  - kind: ImageStream
+    apiVersion: image.openshift.io/v1
+    metadata:
+      name: ${APPLICATION_NAME}-backend
+      labels:
+        app: ${APPLICATION_NAME}
+        template: complexapp
+    spec:
+      lookupPolicy:
+        local: true
+  - kind: BuildConfig
+    apiVersion: v1
+    metadata:
+      name: ${APPLICATION_NAME}-backend
+      labels:
+        app: ${APPLICATION_NAME}
+        template: complexapp
+      annotations:
+        template.alpha.openshift.io/wait-for-ready: "true"
+    spec:
+      runPolicy: Serial
+      output:
+        to:
+          kind: ImageStreamTag
+          name: ${APPLICATION_NAME}-backend:latest
+      source:
+        git:
+          uri: ${GIT_REPO}
+          ref: ${GIT_BRANCH}
+        type: Git
+      strategy:
+        sourceStrategy:
+          from:
+            kind: ImageStreamTag
+            name: python:2.7
+            namespace: openshift
+        type: Source
+      successfullBuildsLimit: 5
+      triggers:
+        - type: ImageChange
+        - type: ConfigChange
+  - kind: DeploymentConfig
+    apiVersion: v1
+    metadata:
+      name: ${APPLICATION_NAME}-backend
+      labels:
+        app: ${APPLICATION_NAME}
+        template: complexapp
+      annotations:
+        template.alpha.openshift.io/wait-for-ready: "true"
+    spec:
+      replicas: 1
+      selector:
+        app: ${APPLICATION_NAME}-backend
+        template: complexapp
+        type: backend
+      template:
+        metadata:
+          labels:
+            app: ${APPLICATION_NAME}-backend
+            type: backend
+            template: complexapp
+        spec:
+          name: ${APPLICATION_NAME}-backend
+          containers:
+            - name: ${APPLICATION_NAME}-backend
+              image: ${APPLICATION_NAME}-backend
+              ports:
+                - containerPort: 8080
+                  protocol: TCP
+                  name: web
+              readinessProbe:
+                httpGet:
+                  path: /health
+                  port: 8080
+                initialDelaySeconds: 5
+                timeoutSeconds: 1
+              livenessProbe:
+                httpGet:
+                  path: /ping
+                  port: 8080
+                initialDelaySeconds: 20
+                timeoutSeconds: 5
+
+
 parameters:
-  - description: Application name. It should be unique within a namespace
+  - description: Application name. It should be unique within the namespace
     required: true
     name: APPLICATION_NAME
   - description: "Database port (default: 3306)"
     required: false
     name: MYSQL_PORT
     value: "3306"
+  - description: "Backend port (default: 8081)"
+    required: false
+    name: BACKEND_PORT
+    value: "8081"
+  - description: "Git repository URL (default: https://github.com/Mad-ness/openshift-projects.git)"
+    name: GIT_REPO
+    required: false
+    value: "https://github.com/Mad-ness/openshift-projects.git"
+  - description: "Name or ID of a commit of the git branch (default: devel)"
+    name: GIT_BRANCH
+    required: false
+    value: "devel"
 
